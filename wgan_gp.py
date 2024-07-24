@@ -1,20 +1,20 @@
-import argparse
+
+import os
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from config import get_args
+from custom_dataset import CustomSequenceDataset, collate_fn
+from preprocess_data import load_sequence_dataset
 from sklearn.metrics import f1_score
-from sklearn.model_selection import train_test_split
 from torch import autograd, mean, ones, rand, randn
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from helper_tools import get_device, set_random_seeds
-from preprocessing.preprocess_data import fetch_sequence_data
-from custom_dataset import CustomSequenceDataset, collate_fn
-from config import get_args
 
 
 class CustomSoftmax(nn.Module):
@@ -339,8 +339,6 @@ def train_wgan(generator, discriminator, optimizer_G, optimizer_D, train_dataloa
                         discriminator.train()
 
 
-
-
 def main():
     # get arguments
     opt = get_args()
@@ -350,7 +348,7 @@ def main():
     hidden_size = 50
     num_layers = 2
     num_classes = 2
-    drop_rate = 0.4
+    drop_rate = 0.1
     device = get_device()
 
     discriminator = Discriminator(input_size,hidden_size,num_layers, num_classes, drop_rate=drop_rate).to(device)
@@ -365,14 +363,18 @@ def main():
     set_random_seeds(seed_value=42)
     
 
-    data_folder_path = "ADFA"
+    # data_folder_path = "ADFA"
+    dataset_folder = os.path.join(os.getcwd(), "data")
 
-    sequences, labels = fetch_sequence_data(data_folder_path)
+    # train_sequences, train_labels = fetch_sequence_data(os.path.join(dataset_folder, "train_dataset.json"))
+    train_data, train_labels = load_sequence_dataset(os.path.join(dataset_folder, "train_dataset.json"))
 
-    # train and test plit
-    train_data, test_data, train_labels, test_labels = train_test_split(
-        sequences, labels, random_state=42, test_size=0.2, stratify=labels, shuffle=True
-    )
+    test_data, test_labels = load_sequence_dataset(os.path.join(dataset_folder, "test_dataset.json"))
+
+    # train and test plit       
+    # train_data, test_data, train_labels, test_labels = train_test_split(
+    #     sequences, labels, random_state=42, test_size=0.2, stratify=labels, shuffle=True
+    # )
 
     max_length = 256 # change it to None for full sequence length
     batch_size = 128
@@ -391,5 +393,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
