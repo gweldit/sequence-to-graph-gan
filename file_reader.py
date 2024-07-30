@@ -1,8 +1,8 @@
+import argparse
 import glob
 import json
 import os
 from collections import Counter
-from pathlib import Path
 
 
 def read_sequences_from_file(file_path):
@@ -25,9 +25,9 @@ def read_sequences_from_folder_with_subfolders(folder_path):
                 sequences.append(read_sequences_from_file(file_path))
     return sequences
 
-def read_all_sequences(parent_folder):
-    data_dir = os.path.join(parent_folder, "ADFA")
-    path_sub_folders = [os.path.join(data_dir, sub_folder)  for sub_folder in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, sub_folder))]
+def read_all_sequences(dataset_folder):
+    
+    path_sub_folders = [os.path.join(dataset_folder, sub_folder)  for sub_folder in os.listdir(dataset_folder) if os.path.isdir(os.path.join(dataset_folder, sub_folder))]
     print("sub folders :", path_sub_folders)
 
     sequences = []
@@ -61,6 +61,28 @@ def save_sequence_data( sequences, labels, output_file_path):
     return output_file_path
 
 
+def encode_sequences(sequences, vocabs):
+    """
+    Encodes a list of sequences using a given vocabulary.
+
+    Args:
+    sequences (list of list of integers): The sequences to encode.
+    vocabs (dict): A dictionary mapping each element to an index.
+
+    Returns:
+    list of list of int: The encoded sequences.
+    """
+    encoded_data = []
+    # Define an index for unknown elements, default to -1 if not provided
+    unk_index = vocabs.get("UNK",-1) 
+
+    for sequence in sequences:
+        encoded_sequence = [vocabs.get(str(element), unk_index) for element in sequence]
+        encoded_data.append(encoded_sequence)
+    
+    return encoded_data
+
+
 def load_and_print_dataset(file_path, print_data):
     with open(file_path, 'r') as f:
         loaded_data = json.load(f)
@@ -86,19 +108,21 @@ def fetch_graphs(encoder, sequences, labels):
     return graphs
 
 
-    
 if __name__ == "__main__":
     # Paths to folders : two normal data folder and third attack folder containing subfolders
-    curr_dirr = os.path.dirname(os.getcwd())
 
-    parent_dirr =Path(curr_dirr).parent
+    # data_dir = os.path.join(parent_folder, "ADFA")
+    parser = argparse.ArgumentParser(description="Read ADFA dataset from given directory")
+
+    parser.add_argument('--dataset_folder', type=str, help='The folder path to the dataset',default="sequence-to-graph/ADFA")
+    args = parser.parse_args()
+
+
+    # curr_dirr = os.path.dirname(os.getcwd())
+
+    # parent_dirr =Path(curr_dirr).parent
     # print("parent dir :", curr_dirr)
-    all_sequences, labels = read_all_sequences(parent_folder=parent_dirr)
-
-    # save the data
-
-
+    print(args.dataset_folder)
+    all_sequences, labels = read_all_sequences(args.dataset_folder)
+    
     print(Counter(labels))
-    # print(Counter(labels))
-
-    # split data into training and testing
