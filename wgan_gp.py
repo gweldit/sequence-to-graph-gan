@@ -7,8 +7,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 from config import get_args
 from custom_dataset import CustomSequenceDataset, collate_fn
-from preprocess_data import load_sequence_dataset
+from file_reader import encode_sequences, load_and_print_dataset
+from graph_encoder import GraphEncoder
 from sklearn.metrics import f1_score
+from sklearn.preprocessing import LabelEncoder
 from torch import autograd, mean, ones, rand, randn
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.utils.data import DataLoader
@@ -29,6 +31,7 @@ class CustomSoftmax(nn.Module):
         """
         super().__init__()
         self.act = act
+        # self.anneal_tau = anneal_tau
 
     def forward(self, logits, tau, hard):
         """
@@ -38,6 +41,7 @@ class CustomSoftmax(nn.Module):
             logits (torch.Tensor): The input logits.
             tau (float): The temperature parameter for the gumbel softmax, relaxed bernoulli, or normal softmax to perform categorical sampling. Defaults to normal softmax.
             hard (bool): Whether to perform hard (one-hot) or soft sampling.
+            anneal_tau (bool): whether to anneal tau (temperature) to explore more or to be reserved.
 
         Returns:
             torch.Tensor: The output tensor after applying the specified activation function.
@@ -80,6 +84,12 @@ class CustomSoftmax(nn.Module):
             y = (y_hard - y).detach() + y
 
         return y
+    
+    @staticmethod
+    def anneal_tau_(initial_tau, final_tau, current_epoch, total_epochs, anneal_interval):
+        if current_epoch % anneal_interval == 0:
+            return initial_tau - (initial_tau - final_tau) * (current_epoch / total_epochs)
+        return initial_tau
 
     def relaxed_bernoulli(self, logits, tau=1, dim=-1):
         """It is also known as a softmax with temperature, or relaxed softmax.
@@ -219,7 +229,7 @@ def train_wgan(generator, discriminator, optimizer_G, optimizer_D, train_dataloa
     # ----------
 
     batches_done = 0
-    weight = torch.tensor([1.0, 2.0], dtype=torch.float32,device=device)
+    weight = torch.tensor([1.0, 2.0], dtype=torch.float32,device=device) # use weight based-balancing of classes when traing WGAN-GP model
     criterion = nn.CrossEntropyLoss(weight)
 
     for epoch in range(1, opt.epochs + 1):
@@ -246,7 +256,7 @@ def train_wgan(generator, discriminator, optimizer_G, optimizer_D, train_dataloa
             z = randn(real_data.shape[0], generator.latent_dim).to(device)
 
             # Generate a batch of images
-            fake_data = generator(z, labels, tau=opt.tau, hard=opt.hard) #.detach()
+            fake_data = generator(z, labels, tau=opt.tau, hard=opt.hard).detach()
 
             # Real data
             discriminator_real_data_output = discriminator(packed_input, labels)
@@ -263,7 +273,6 @@ def train_wgan(generator, discriminator, optimizer_G, optimizer_D, train_dataloa
             
             # compute classes loss
             d_class_loss = 0.5 * (criterion(real_class_output, labels) + criterion(fake_class_output, labels)) 
-
 
             # Adversarial loss
             d_loss = -mean(real_validity) + mean(fake_validity) + opt.lambda_gp * gradient_penalty
@@ -303,7 +312,7 @@ def train_wgan(generator, discriminator, optimizer_G, optimizer_D, train_dataloa
                     % (epoch, opt.epochs, i, len(train_dataloader), d_loss.item(), g_loss.item())
                 )
 
-                if epoch % 10 == 0:
+                if epoch % 100 == 0:
                     # save the generator weights
                     torch.save(generator.state_dict(), f"wgan_generator_{epoch}.pth")                
 
@@ -343,17 +352,20 @@ def main():
     # get arguments
     opt = get_args()
 
-    vocab_size = 343
+    # load vocabulary
+    vocabs = GraphEncoder.load_vocabulary()
+
+    vocab_size = len(vocabs)
     input_size = vocab_size  
     hidden_size = 50
     num_layers = 2
     num_classes = 2
-    drop_rate = 0.1
+    drop_rate = 0.3
     device = get_device()
 
     discriminator = Discriminator(input_size,hidden_size,num_layers, num_classes, drop_rate=drop_rate).to(device)
-    generator = Generator(opt.vocab_size, num_classes).to(device)
 
+    generator = Generator(opt.vocab_size, num_classes).to(device)
 
     # Optimizers
     optimizer_G = optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -362,22 +374,25 @@ def main():
 
     set_random_seeds(seed_value=42)
     
-
     # data_folder_path = "ADFA"
     dataset_folder = os.path.join(os.getcwd(), "data")
 
-    # train_sequences, train_labels = fetch_sequence_data(os.path.join(dataset_folder, "train_dataset.json"))
-    train_data, train_labels = load_sequence_dataset(os.path.join(dataset_folder, "train_dataset.json"))
+    train_data, train_labels = load_and_print_dataset(os.path.join(dataset_folder, "train_dataset.json"),print_data=False)
 
-    test_data, test_labels = load_sequence_dataset(os.path.join(dataset_folder, "test_dataset.json"))
+    test_data, test_labels = load_and_print_dataset(os.path.join(dataset_folder, "test_dataset.json"),print_data=False)
 
-    # train and test plit       
-    # train_data, test_data, train_labels, test_labels = train_test_split(
-    #     sequences, labels, random_state=42, test_size=0.2, stratify=labels, shuffle=True
-    # )
+    # encode sequences using vocabulary
+    train_data = encode_sequences(train_data, vocabs)
+    test_data = encode_sequences(test_data, vocabs)
 
-    max_length = 256 # change it to None for full sequence length
-    batch_size = 128
+    label_encoder = LabelEncoder()
+    train_labels = label_encoder.fit_transform(train_labels)
+    test_labels = label_encoder.transform(test_labels)
+    # print(collections.Counter(test_labels))
+
+
+    max_length = opt.seq_len # Controls the sequence length of inputs to Discriminator. (LSTM)
+    batch_size = opt.batch_size
 
     train_dataset = CustomSequenceDataset(train_data, train_labels, length=max_length)
     test_dataset = CustomSequenceDataset(test_data, test_labels, max_length)
@@ -393,6 +408,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-

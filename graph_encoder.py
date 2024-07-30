@@ -1,9 +1,13 @@
 
+import argparse
+import json
+import os
 import pickle
-import re
+from typing import List
 
 import matplotlib.pyplot as plt
 import networkx as nx
+from sqlalchemy import desc
 import torch
 import torch_geometric
 from custom_dataset import CustomGraphDataset
@@ -14,52 +18,12 @@ from sklearn.preprocessing import LabelEncoder
 from syscall_file_reader import SyscallFileReader
 from torch_geometric.data import Data
 
-RELEVANT_SYSCALLS = {
-    "recvfrom", "write", "ioctl", "read", "sendto", "writev", "close", "socket", "bind", "connect",
-    "mkdir", "access", "chmod", "open", "fchown", "rename", "unlink", "umask", "recvmsg", "sendmsg",
-    "getdents64", "epoll_wait", "dup", "pread", "pwrit", "fcntl64"
-}
+# RELEVANT_SYSCALLS = {
+#     "recvfrom", "write", "ioctl", "read", "sendto", "writev", "close", "socket", "bind", "connect",
+#     "mkdir", "access", "chmod", "open", "fchown", "rename", "unlink", "umask", "recvmsg", "sendmsg",
+#     "getdents64", "epoll_wait", "dup", "pread", "pwrit", "fcntl64"
+# }
 
-
-class SyscallFileReader:
-    def __init__(self, filter_calls=False):
-        self.filter_calls = filter_calls
-
-    def read(self, file_path):
-        with open(file_path, 'r') as file:
-            lines = file.readlines()
-
-        # Determine the format by checking the first non-empty line
-        first_non_empty_line = next((line for line in lines if line.strip()), '').strip()
-
-        # If the line is numeric (possibly space-separated), treat it as a pre-processed sequence
-        if first_non_empty_line.replace(' ', '').isnumeric():
-            # Assuming pre-processed sequences are space-separated
-            syscalls = [int(num) for num in first_non_empty_line.split()]
-        else:
-            # Define a regular expression pattern for syscalls (assuming syscalls start with word characters and end with '(')
-            syscall_pattern = re.compile(r'^\w+\(')
-
-            syscalls = []
-
-            for line in lines:
-                # Strip whitespace from the beginning and end of the line
-                line = line.strip()
-
-                # Use regular expression to find a match at the start of the line
-                match = syscall_pattern.match(line)
-                if match:
-                    syscall_name = match.group().rstrip('(')  # Extract syscall name and remove trailing '('
-
-                    if self.filter_calls:
-                        # Include only relevant syscalls if filtering is enabled
-                        if syscall_name in self.RELEVANT_SYSCALLS:
-                            syscalls.append(syscall_name)
-                    else:
-                        # Include all syscalls if no filtering is applied
-                        syscalls.append(syscall_name)
-
-        return syscalls
 
 class GraphEncoder:
     """Class to encode system call sequences into graph structures."""
@@ -79,7 +43,25 @@ class GraphEncoder:
                 
                 self.syscall_vocabs[syscall] = len(self.syscall_vocabs)
 
-    def encode(self, sequence_of_syscalls):
+
+    def save_vocabulary(self):
+        """Save the vocabulary to a json file."""
+    
+        file_path = os.path.join(os.getcwd(), 'data/syscall_vocabs.json')
+        with open(file_path, 'w') as f:
+            json.dump(self.syscall_vocabs, f)
+
+        print(f"Vocabulary saved to {file_path}.")
+
+    @staticmethod
+    def load_vocabulary():
+        """Load the vocabulary from a json file."""
+        
+        with open('data/syscall_vocabs.json', 'r') as f:
+            vocabs = json.load(f)
+            return vocabs
+
+    def encode(self, sequence_of_syscalls:List):
         """Encode a sequence of system calls into a graph."""
 
         if not sequence_of_syscalls:
@@ -215,38 +197,7 @@ class GraphEncoder:
 
             dataset = CustomGraphDataset(graphs, len(label_encoder.classes_), training=training)
     
-            return dataset, vocab_size, label_encoder
-        
-    @staticmethod
-    def load_data(dataset_path):
-        """ this function will be removed soon. """
-        graph_data, vocab_size = load_dataset(dataset_path)
-
-        graphs = [data['graph'] for data in graph_data]
-        labels = [data['label'] for data in graph_data]
-
-        train_graphs, test_graphs, train_labels, test_labels = train_test_split(
-            graphs, labels, test_size=0.3, random_state=42, stratify=labels
-        )
-
-        # Binarize labels
-        train_labels = ['normal' if label == 'normal' else 'malware' for label in train_labels]
-        test_labels = ['normal' if label == 'normal' else 'malware' for label in test_labels]
-
-        # Encode labels
-        label_encoder = LabelEncoder()
-        train_labels = label_encoder.fit_transform(train_labels)
-        test_labels = label_encoder.transform(test_labels)
-
-        for graph, label in zip(train_graphs, train_labels):
-            graph.y = torch.tensor([label], dtype=torch.long)
-
-        for graph, label in zip(test_graphs, test_labels):
-            graph.y = torch.tensor([label], dtype=torch.long)
-
-        train_dataset = CustomGraphDataset(train_graphs, len(label_encoder.classes_), training=True)
-        test_dataset = CustomGraphDataset(test_graphs, len(label_encoder.classes_), training=False)
-        return train_dataset, test_dataset, vocab_size, label_encoder
+            return dataset, vocab_size, label_encoder 
 
 
     def plot_graph(self, file_path, filter_calls, graph, node_mapping):
@@ -301,37 +252,59 @@ def test(file_path, filter_calls, plot):
         encoder.plot_graph(file_path, filter_calls, graph, node_mapping)
 
 
-    
 
-if __name__ == "__main__":
+def main():
     # fetch sequence data
-    data_folder_path = "/Users/gere/Desktop/research projects/gan_models"
-    sequences, labels = read_all_sequences(data_folder_path)
+    parser = argparse.ArgumentParser(description="reads sequences from given directory")
+
+    parser.add_argument('--dataset_folder', type=str, help='The folder path to the dataset',default="sequence-to-graph/ADFA")
+
+    parser.add_argument('--train_file_path', type=str, help='The path to the file containing the sequences of training dataset',default="data/train_dataset.json") 
+
+
+    parser.add_argument('--test_file_path', type=str, help='The path to the file containing the sequences of testing set',default="data/test_dataset.json") 
+
+    parser.add_argument('--train_graph_file', type=str, help='The path to the pickle file containing the sequences of testing set',default="data/train_graph_data.pkl") 
+
+    parser.add_argument('--test_graph_file', type=str, help='The path to the pickle file containing the sequences of testing set',default="data/test_graph_data.pkl")
+
+
+    args = parser.parse_args()
+
+    sequences, labels = read_all_sequences(args.dataset_folder)
+
+    # build vocabulary
+    # save vocabs in json file
     # split data into train and test sets
     train_sequences, test_sequences, train_labels, test_labels = train_test_split(
         sequences, labels, test_size=0.3, random_state=42, stratify=labels
     )
     # save the sequences and their labels to a pkl files
-    save_sequence_data(train_sequences, train_labels, "data/train_dataset.json")
-    save_sequence_data(test_sequences, test_labels, "data/test_dataset.json")
+    save_sequence_data(train_sequences, train_labels, args.train_file_path)
+    save_sequence_data(test_sequences, test_labels, args.test_file_path)
     # load the sequences and their labels from the pkl files
-    train_sequences, train_labels = load_and_print_dataset("data/train_dataset.json", print_data=False)
-    test_sequences, test_labels = load_and_print_dataset("data/test_dataset.json", print_data=False)
+    train_sequences, train_labels = load_and_print_dataset(args.train_file_path, print_data=False)
+    test_sequences, test_labels = load_and_print_dataset(args.test_file_path, print_data=False)
 
-    # build vocabulary
+    # build vocabulary and fetch graphs
     encoder = GraphEncoder()
-    # build vocabulary using only the training sequences
-    encoder = GraphEncoder()
-    for sequence in train_sequences:
-        encoder.build_vocabulary(sequence)
-    
-    # fetch graphs
     train_graphs, node_mappings = encoder.fetch_graphs(train_sequences, train_labels)
     print("vocab size in training dataset: ", len(encoder.syscall_vocabs))
     test_graphs, _ = encoder.fetch_graphs(test_sequences, test_labels)
-    encoder.save_graph_data(train_graphs, "data/train_graph_data.pkl")
-    encoder.save_graph_data(test_graphs, "data/test_graph_data.pkl") 
+
+    print("vocab size in test dataset: ", len(encoder.syscall_vocabs))
+
+    # save the vocabs for encoding the sequence when training GAN Model
+    encoder.save_vocabulary()
+
+    # save graph data
+    encoder.save_graph_data(train_graphs, args.train_graph_file)
+    encoder.save_graph_data(test_graphs,args.test_graph_file) 
 
     # load graphs
-    train_graphs, vocab_size, label_encoder = encoder.load_graph_data("data/train_graph_data.pkl", vocab_size=len(encoder.syscall_vocabs.keys()), training=True)
-    test_graphs, vocab_size,label_encoder = encoder.load_graph_data("data/test_graph_data.pkl", vocab_size=len(encoder.syscall_vocabs.keys()), training=False, label_encoder=label_encoder)
+    train_graphs, vocab_size, label_encoder = encoder.load_graph_data(args.train_graph_file, vocab_size=len(encoder.syscall_vocabs.keys()), training=True)
+    test_graphs, vocab_size,label_encoder = encoder.load_graph_data(args.test_graph_file, vocab_size=len(encoder.syscall_vocabs.keys()), training=False, label_encoder=label_encoder)
+
+
+if __name__ == "__main__":
+    main()

@@ -14,7 +14,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Train a GNN model on a graph dataset")
 
     # Dataset and Experiment Configuration
-    parser.add_argument("--dataset_path", type=str, default='data/processed_graphs.pkl', help="Path to the dataset")
+    # parser.add_argument("--dataset_path", type=str, default='data/processed_graphs.pkl', help="Path to the dataset")
     parser.add_argument("--experiment_name", type=str, default=None, help="Name of the experiment")
 
     # Model Parameters
@@ -35,7 +35,7 @@ def parse_arguments():
     parser.add_argument("--weight_decay", type=float, default=1e-6, help="Weight decay for optimizer")
 
     # add boolean argument to perform oversampling of the minority class
-    parser.add_argument("--use_fake_data", type=bool, default=False, help="A boolean argument")
+    parser.add_argument("--use_fake_data", type=bool, default=False, help="If set to True,the fake data is added to the training set for balancing purposes.")
 
 
     # Other Parameters
@@ -60,6 +60,7 @@ def train_epoch(model, train_loader, optimizer, scheduler, criterion, device):
     for data in train_loader:
         data = data.to(device)
         optimizer.zero_grad()
+        print("max token = ", data.x[:,0].max())
         out = model(data.x, data.edge_index, data.batch)
         loss = criterion(out, data.y)
         loss.backward()
@@ -93,20 +94,23 @@ def main():
     vocab_size = 175
 
     train_dataset, vocab_size, label_encoder = enc.load_graph_data("data/train_graph_data.pkl", vocab_size=vocab_size,training=True, )
-    
-    
+
+    # print(train_dataset[0])
+
 
     # if oversampling / use fake data is true
     if args.use_fake_data:
         fake_dataset, vocab_size, label_encoder = enc.load_graph_data("data/fake_graph_data.pkl", vocab_size=vocab_size,training=True, label_encoder=label_encoder)
 
         # combine train_dataset and fake_dataset
-        print("type of train_dataset,", type(train_dataset[0]), train_dataset[0])
         train_dataset = train_dataset + fake_dataset    
+
+        print("type of train_dataset,", type(train_dataset[0]))
+        print("sample dataset = ",  ([train_dataset[i].x[:,0].min().item() for i in range(len(train_dataset))]))
         
         print("len of train dataset = ", len(train_dataset))
         
-    test_dataset, _, _ = enc.load_graph_data("data/test_graph_data.pkl", vocab_size=vocab_size, training=False,label_encoder=label_encoder)
+    test_dataset, vocab_size, _ = enc.load_graph_data("data/test_graph_data.pkl", vocab_size=vocab_size, training=False,label_encoder=label_encoder)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False)
 
@@ -132,12 +136,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-    # ToDO:
-        # 1 - generate fake data (REMAINING: Train simple and complex GANs with relaxed bernoulli and gumbel softmax) at epochs = 10, 20, 30, 40, 50
-
-        # 2 - add fake samples to the training sets to balance the dataset (DONE)
-
-        # 3- train the gnn model (DONE)
-
-        # 4- evaluate the gnn model (DONE)
