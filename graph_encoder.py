@@ -14,7 +14,7 @@ from file_reader import (load_and_print_dataset, read_all_sequences,
                          save_sequence_data)
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from syscall_file_reader import SyscallFileReader
+# from syscall_file_reader import SyscallFileReader
 from torch_geometric.data import Data
 
 # RELEVANT_SYSCALLS = {
@@ -236,19 +236,19 @@ class GraphEncoder:
         )
 
 
-def test(file_path, filter_calls, plot):
-    reader = SyscallFileReader(filter_calls)
-    encoder = GraphEncoder()
+# def test(file_path, filter_calls, plot):
+#     reader = SyscallFileReader(filter_calls)
+#     encoder = GraphEncoder()
 
-    # Read syscall
-    syscalls = reader.read(file_path)
-    graph, node_mapping = encoder.encode(syscalls=syscalls)
-    # print(syscalls)
+#     # Read syscall
+#     syscalls = reader.read(file_path)
+#     graph, node_mapping = encoder.encode(syscalls=syscalls)
+#     # print(syscalls)
 
-    if plot:
-        # Generate graph plot
-        print(graph)
-        encoder.plot_graph(file_path, filter_calls, graph, node_mapping)
+#     if plot:
+#         # Generate graph plot
+#         print(graph)
+#         encoder.plot_graph(file_path, filter_calls, graph, node_mapping)
 
 
 
