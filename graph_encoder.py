@@ -7,7 +7,6 @@ from typing import List
 
 import matplotlib.pyplot as plt
 import networkx as nx
-from sqlalchemy import desc
 import torch
 import torch_geometric
 from custom_dataset import CustomGraphDataset
@@ -174,7 +173,7 @@ class GraphEncoder:
         
         with open(file_path, "rb") as f:
             graph_data = pickle.load(f)
-            print(len(graph_data))
+            # print(len(graph_data))
 
             graphs = [data['graph'] for data in graph_data]
             labels = [data['label'] for data in graph_data]

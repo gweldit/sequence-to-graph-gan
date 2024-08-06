@@ -16,7 +16,7 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from helper_tools import get_device, set_random_seeds
+from helper_tools import get_device, set_random_seeds, sample_equal_data
 
 
 class CustomSoftmax(nn.Module):
@@ -102,6 +102,41 @@ class CustomSoftmax(nn.Module):
         """
 
         return F.softmax(logits / tau, dim)
+
+
+class ConvGenerator(nn.Module):
+    def __init__(self, vocab_size, n_classes=2):
+        super(ConvGenerator, self).__init__()
+        self.latent_dim = 100
+        self.seq_len = 120
+        self.vocab_size = vocab_size
+
+        def block(in_channels, out_channels, kernel_size, stride, padding, normalize=True):
+            layers = [nn.ConvTranspose1d(in_channels, out_channels, kernel_size, stride, padding)]
+            if normalize:
+                layers.append(nn.BatchNorm1d(out_channels, 0.8))
+            layers.append(nn.LeakyReLU(0.2, inplace=True))
+            return layers
+
+        self.model = nn.Sequential(
+            *block(self.latent_dim, 512, kernel_size=4, stride=1, padding=0, normalize=False),
+            *block(512, 256, kernel_size=4, stride=2, padding=1),
+            *block(256, 128, kernel_size=4, stride=2, padding=1),
+            nn.Conv1d(128, self.vocab_size, kernel_size=3, stride=1, padding=1)
+        )
+
+        self.label_embedding = nn.Embedding(n_classes, self.latent_dim)
+        self.gumbel_softmax = CustomSoftmax()
+
+    def forward(self, noise, labels, tau, hard):
+        condition = self.label_embedding(labels)
+        out = torch.mul(noise, condition).unsqueeze(2)
+        gen_data = self.model(out)
+        gen_data = gen_data.view(noise.shape[0], self.seq_len, self.vocab_size)
+        gen_data = self.gumbel_softmax(gen_data, tau=tau, hard=hard)
+        return gen_data
+
+
 
 class Generator(nn.Module):
     def __init__(self, vocab_size, n_classes=2):
@@ -261,12 +296,12 @@ def train_wgan(generator, discriminator, optimizer_G, optimizer_D, train_dataloa
             # Real data
             discriminator_real_data_output = discriminator(packed_input, labels)
             real_validity = discriminator_real_data_output[:, 0]
-            real_class_output = discriminator_real_data_output[:, 1:]
+            real_class_output = F.softmax(discriminator_real_data_output[:, 1:], dim=-1)
 
             # Fake data
             discriminator_fake_data_output = discriminator(fake_data)
             fake_validity = discriminator_fake_data_output[:,0]
-            fake_class_output = discriminator_fake_data_output[:, 1:]
+            fake_class_output = F.softmax(discriminator_fake_data_output[:, 1:], dim=-1)
 
             # Gradient penalty
             gradient_penalty = compute_gradient_penalty(discriminator, real_data, fake_data, labels, lengths)
@@ -297,7 +332,7 @@ def train_wgan(generator, discriminator, optimizer_G, optimizer_D, train_dataloa
                 # Train on fake data
                 discriminator_fake_data_output = discriminator(fake_data)
                 fake_validity = discriminator_fake_data_output[:, 0]
-                fake_class_output = discriminator_fake_data_output[:,1:]
+                fake_class_output = F.softmax(discriminator_fake_data_output[:,1:], dim=-1)
 
                 # compute g's classes loss
                 g_class_loss = 0.5 * criterion(fake_class_output, labels)
@@ -312,10 +347,9 @@ def train_wgan(generator, discriminator, optimizer_G, optimizer_D, train_dataloa
                     % (epoch, opt.epochs, i, len(train_dataloader), d_loss.item(), g_loss.item())
                 )
 
-                if epoch % 100 == 0:
+                if epoch % 5 == 0:
                     # save the generator weights
-                    torch.save(generator.state_dict(), f"wgan_generator_{epoch}.pth")                
-
+                    torch.save(generator.state_dict(), f"saved_models/wgan_generator_{epoch}.pth")               
                 
                 if epoch % 5 == 0: # validate every 5epochs
                     with torch.no_grad():
@@ -388,6 +422,9 @@ def main():
     label_encoder = LabelEncoder()
     train_labels = label_encoder.fit_transform(train_labels)
     test_labels = label_encoder.transform(test_labels)
+
+    # sample equal data distribution between classes
+    train_data, train_labels = sample_equal_data(train_data, train_labels)
     # print(collections.Counter(test_labels))
 
 

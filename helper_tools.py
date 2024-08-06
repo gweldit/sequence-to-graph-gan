@@ -1,3 +1,5 @@
+from collections import Counter
+import random
 from typing import List
 
 import matplotlib.pyplot as plt
@@ -67,3 +69,33 @@ def set_random_seeds(seed_value=42):
     torch.manual_seed(seed)
     np.random.seed(seed)
     torch.backends.cudnn.deterministic = True
+
+
+
+def sample_equal_data(train_data, train_labels):
+    sampled_train_data = []
+    sampled_train_labels = []
+
+    # Combine data and labels
+    train_data_with_labels = list(zip(train_data, train_labels))
+    # Shuffle data
+    random.shuffle(train_data_with_labels)
+
+    # Count classes
+    class_counts = Counter(train_labels)
+    min_class_count = min(class_counts.values())
+
+    # Initialize a dictionary to keep track of sampled data for each class
+    sampled_data_dict = {label: [] for label in class_counts.keys()}
+
+    # Sample data
+    for data, label in train_data_with_labels:
+        if len(sampled_data_dict[label]) < min_class_count:
+            sampled_data_dict[label].append(data)
+
+    # Flatten the sampled data and labels
+    for label, data_list in sampled_data_dict.items():
+        sampled_train_data.extend(data_list)
+        sampled_train_labels.extend([label] * len(data_list))
+
+    return sampled_train_data, sampled_train_labels

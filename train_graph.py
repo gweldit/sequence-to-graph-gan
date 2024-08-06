@@ -35,7 +35,8 @@ def parse_arguments():
     parser.add_argument("--weight_decay", type=float, default=1e-6, help="Weight decay for optimizer")
 
     # add boolean argument to perform oversampling of the minority class
-    parser.add_argument("--use_fake_data", type=bool, default=False, help="If set to True,the fake data is added to the training set for balancing purposes.")
+    parser.add_argument("--use_fake_data",  action='store_true',default=False, help="use fake data flag.")
+
 
 
     # Other Parameters
@@ -60,7 +61,7 @@ def train_epoch(model, train_loader, optimizer, scheduler, criterion, device):
     for data in train_loader:
         data = data.to(device)
         optimizer.zero_grad()
-        print("max token = ", data.x[:,0].max())
+        # print("max token = ", data.x[:,0].max())
         out = model(data.x, data.edge_index, data.batch)
         loss = criterion(out, data.y)
         loss.backward()
@@ -99,16 +100,19 @@ def main():
 
 
     # if oversampling / use fake data is true
-    if args.use_fake_data:
+    if args.use_fake_data is True:
+        print("Using fake data to train GNN model")
         fake_dataset, vocab_size, label_encoder = enc.load_graph_data("data/fake_graph_data.pkl", vocab_size=vocab_size,training=True, label_encoder=label_encoder)
 
         # combine train_dataset and fake_dataset
         train_dataset = train_dataset + fake_dataset    
 
         print("type of train_dataset,", type(train_dataset[0]))
-        print("sample dataset = ",  ([train_dataset[i].x[:,0].min().item() for i in range(len(train_dataset))]))
+        # print("sample dataset = ",  ([train_dataset[i].x[:,0].min().item() for i in range(len(train_dataset))]))
         
         print("len of train dataset = ", len(train_dataset))
+    else:
+        print("len of training dataset = ", len(train_dataset))
         
     test_dataset, vocab_size, _ = enc.load_graph_data("data/test_graph_data.pkl", vocab_size=vocab_size, training=False,label_encoder=label_encoder)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
