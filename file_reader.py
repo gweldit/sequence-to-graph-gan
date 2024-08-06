@@ -48,6 +48,14 @@ def read_all_sequences(dataset_folder):
 
 def save_sequence_data( sequences, labels, output_file_path):
     # Serialize all sequence data and vocabulary to a single file
+
+    # check if folder exists, else create new folder
+    data_dir = os.path.join(os.getcwd(), 'data')
+    print("data dir path = ", data_dir)
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+        print(f"Create directory: {data_dir}")
+        
     with open(output_file_path, 'w') as f:
         data_to_save = {
             'sequence_data': sequences,
@@ -56,7 +64,17 @@ def save_sequence_data( sequences, labels, output_file_path):
             'labels': labels
             # 'vocab': syscall_vocab, 
         }
-        json.dump(data_to_save, f)
+
+        
+
+        # check if file alreay exists in a folder
+        if os.path.exists(output_file_path):
+            print(f"File {output_file_path} already exists. Overwriting...")
+            
+        else:
+            print(f"File {output_file_path} does not exist. Creating new file")
+        with open(output_file_path, 'w') as f:
+            json.dump(data_to_save, f)
 
     return output_file_path
 
