@@ -54,9 +54,13 @@ Once you activate directory, you can clone this ropo as follows.
    ```
 
 3. **Install dependencies**
+   <!--
+      ```bash
+       pip3 install -r requirements.txt
+      ``` -->
 
    ```bash
-    pip3 install -r requirements.txt
+      pip3 install torch torch-geometric  networkx matplotlib scikit-learn numpy seaborn
    ```
 
 4. **Instructions to Run the project**
