@@ -38,7 +38,6 @@ def read_all_sequences(dataset_folder):
             sequences.extend(data)
             labels.extend(["malware"] * len(data))
 
-
         else:
             data = read_sequences_from_folder(folder_path)
             sequences.extend(data)
