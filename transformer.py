@@ -175,7 +175,16 @@ class TransformerBlock(nn.Module):
         
         return out
     
+# class CustomTransformerEncoderLayer(nn.TransformerEncoderLayer):
+#     def __init__(self, embed_size, num_heads, forward_expansion, dropout):
+#         super(CustomTransformerEncoderLayer, self).__init__(d_model=embed_size, nhead=num_heads, dim_feedforward=forward_expansion, dropout=dropout, activation="relu", batch_first=True)
+#         self.self_attn = MaskedSelfAttention(embed_size, num_heads)
+#         self.norm = nn.LayerNorm(embed_size)
+#         self.dropout = nn.Dropout(dropout)
 
+#     def forward(self, x, attn_mask, key_padding_mask):
+#         x = self.norm(x + self.dropout(self._forward(x, attn_mask, key_padding_mask)))
+#         return x
     
 class TransformerEncoder(nn.Module):
     def __init__(self, embed_size, num_heads, num_layers, forward_expansion, dropout):

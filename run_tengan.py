@@ -11,6 +11,8 @@ from tengan import Discriminator, Generator, SequenceGenerator, TenGAN
 from tokenizer import Tokenizer
 
 
+def fetch_malware_samples(sequences, labels):
+    return [sequences[idx] for idx, label  in enumerate(labels) if label=="malware"]
 
 
 def read_samples(filename):
@@ -54,6 +56,8 @@ def main():
 
     args = parser.parse_args()
     
+
+
 
 
     # stpe 1: Load sequences dataset and fetch only positive (malware samples)

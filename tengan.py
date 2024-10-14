@@ -238,6 +238,8 @@ class Discriminator(L.LightningModule):
 
 
 
+
+
 class SequenceGenerator:
     def __init__(self, model, tokenizer, max_len, batch_size):
         self.model = model
