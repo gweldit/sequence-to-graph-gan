@@ -31,41 +31,33 @@ class Tokenizer():
     #     # Encode the sequence with start and end tokens
     #     return [self.token_to_int[self.start]] + [self.token_to_int[token] for token in sequence] + [self.token_to_int[self.end]]
     
-    def encode(self, sequences):
+
+    def encode(self, sequence):
         # Check if the input is a single sequence or list of list sequences
-        if len(sequences) == 1:
+        # if len(sequences) == 1:
             # If it's a single sequence, tokenize and encode it
             # sequence = sequences[0]
-            return [[self.token_to_int[self.start]] + [self.token_to_int[token] for token in sequences[0]] + [self.token_to_int[self.end]]]
-        else:
-            # If it's a list of sequences, encode each one
-            encoded_sequences = []
-            for sequence in sequences:
-                # tokens = sequence.split()
-                encoded_sequence = [self.token_to_int[self.start]] + [self.token_to_int[token] for token in sequence] + [self.token_to_int[self.end]]
-                encoded_sequences.append(encoded_sequence)
-            return encoded_sequences
+            return [[self.token_to_int[self.start]] + [self.token_to_int[token] for token in sequence]+ [self.token_to_int[self.end]]]
+        # else:
+        #     # If it's a list of sequences, encode each one
+        #     encoded_sequences = []
+        #     for sequence in sequences:
+        #         # tokens = sequence.split()
+        #         encoded_sequence = [self.token_to_int[self.start]] + [self.token_to_int[token] for token in sequence] + [self.token_to_int[self.end]]
+        #         encoded_sequences.append(encoded_sequence)
+        #     return encoded_sequences
 
 
-    def decode(self, encoded_sequences):
-        # Decode list of sequences
+    def decode(self, encoded_sequence):
+        # Decode a single encoded sequence
         decoded = []
-        for encoded_sequence in encoded_sequences:
-            # print(self._tokenlist)
-            d = []
-            start_pad_end_tokens = [self.token_to_int[self.start], self.token_to_int[self.end], self.token_to_int[self.pad]]
+        start_pad_end_tokens = [self.token_to_int[self.start], self.token_to_int[self.end], self.token_to_int[self.pad]]
 
-            for ord_val in encoded_sequence:
-                if ord_val not in start_pad_end_tokens:
-                    d.append(self.int_to_token[ord_val])
-            decoded.append(d)
-
+        for token_id in encoded_sequence:
+            if token_id not in start_pad_end_tokens:
+                decoded.append(self.int_to_token[token_id])
 
         return decoded
-
-        # Decode the sequence, removing start and end tokens
-
-        # return [self.int_to_token[o] for o in ords if o not in {self.token_to_int[self.start], self.token_to_int[self.end], self.token_to_int[self.pad]}]
 
     @property
     def n_tokens(self):

@@ -256,7 +256,7 @@ def main():
     # fetch sequence data
     parser = argparse.ArgumentParser(description="reads sequences from given directory")
 
-    parser.add_argument('--dataset_folder', type=str, help='The folder path to the dataset',default="sequence-to-graph/ADFA")
+    parser.add_argument('--dataset_folder', type=str, help='The folder path to the dataset',default="ADFA")
 
     parser.add_argument('--train_file_path', type=str, help='The path to the file containing the sequences of training dataset',default="data/train_dataset.json") 
 
