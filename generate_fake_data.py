@@ -54,8 +54,8 @@ def gen_fake_data(generator_name, labels, args, output_file_name:str="data/fake_
     
     encoder = GraphEncoder()
     loaded_vocabs = encoder.load_vocabulary()
-    vocabs = {i:i for i in range(len(loaded_vocabs))}
-    vocab_size = len(vocabs)
+    vocabs = {key:value for key, value in loaded_vocabs.items()}
+    vocab_size = len(vocabs.keys())
     device = labels.device
     generator = load_model(generator_name, args).to(device)
     generator.eval() 
@@ -74,7 +74,7 @@ def gen_fake_data(generator_name, labels, args, output_file_name:str="data/fake_
         fake_data = gen_data.cpu().detach().tolist()
         fake_labels = labels.cpu().detach().tolist()
         # set syscall vocabs to the encoder object, making it compatible with the original data encoding.
-        setattr(encoder, "syscall_vocabs", vocabs)
+        setattr(encoder, "syscall_vocabs", loaded_vocabs)
 
         gen_graphs, _ = encoder.fetch_graphs(fake_data, fake_labels)
 

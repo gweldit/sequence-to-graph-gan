@@ -1,5 +1,6 @@
 import argparse
 import csv
+import dis
 
 import lightning as L
 import numpy as np
@@ -8,57 +9,52 @@ import torch
 from data_iter import DisDataModule, GenDataModule
 from file_reader import load_and_print_dataset
 from tengan import Discriminator, Generator, SequenceGenerator, TenGAN
+import tengan_config
 from tokenizer import Tokenizer
 
 
 def fetch_malware_samples(sequences, labels):
     return [sequences[idx] for idx, label  in enumerate(labels) if label=="malware"]
 
+def clean_sequences(gen_samples, tokenizer, token2int=False):
+    cleaned_sequences = []
+    for seq in gen_samples:
+        # Remove first token
+        seq = seq[1:]
+        try:
+            idx_end_token = seq.index(tokenizer.token_to_int[tokenizer.end])
+        except ValueError:
+            idx_end_token = None  # or any other value indicating the item is not found
 
-def read_samples(filename):
+        if idx_end_token is not None:
+            seq = seq[:idx_end_token]
+        
+        if token2int:
+            seq = [tokenizer.int_to_token[token] for token in seq if tokenizer.int_to_token[token] not in [tokenizer.end, tokenizer.start, tokenizer.pad]]
+        cleaned_sequences.append(np.array(seq, dtype=np.int32).tolist())
+    
+    return cleaned_sequences
+def read_generated_samples(filename, clean=False, tokenizer=None, token2int=False):
     # Read from CSV file
-    with open('output.csv', 'r') as file:
+    with open(filename, 'r') as file:
         reader = csv.reader(file)
         data = [row for row in reader]
 
     gen_data = np.array(data, dtype=np.int32).tolist()
+    if clean:
+        assert tokenizer is not None, "Tokenizer cannot be None to get clean sequences."
+        gen_data = clean_sequences(gen_data, tokenizer, token2int=token2int)
+    
     return gen_data
 
 def remove_item_and_repetitions(lst, item):
     return [x for x in lst if x != item]
     
+
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--batch_size', type=int, default=16)
-    # parser.add_argument('--vocab_size', type=int, default=200)
-    parser.add_argument('--seq_length', type=int, default=290) # 300, 400
-    parser.add_argument('--embedding_dim', type=int, default=64) # 512
-    parser.add_argument('--num_heads', type=int, default=4)
-    parser.add_argument('--num_encoders', type=int, default=3) # 4
-    parser.add_argument('--dim_feedforward', type=int, default=64) # 12
-    parser.add_argument('--dropout', type=float, default=0.1)
-    # parser.add_argument('--n_classes', type=int, default=2)
-    parser.add_argument('--pretrain_epochs', type=int, default=50)
-    parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--use_wgan', type=bool, default=False)
-    parser.add_argument('--n_critic', type=int, default=5)
-    parser.add_argument('--g_steps', type=int, default=3) # higher value is better at estimating and reducing variance in gradients
-
-    parser.add_argument('--lr', type=float, default=0.0002)
-
-    parser.add_argument('--train_file_path', type=str, help='The path to the file containing the sequences of training dataset',default="data/train_dataset.json") 
-
-
-    parser.add_argument('--test_file_path', type=str, help='The path to the file containing the sequences of testing set',default="data/test_dataset.json") 
-    parser.add_argument('--pre_training_disc', type=bool, default=False)
-    parser.add_argument('--pre_training_gen',type=bool, default=False)
-    parser.add_argument('--adversarial_training',type=bool, default=False)
-
-    args = parser.parse_args()
     
-
-
-
+    args = tengan_config.get_args()
 
     # stpe 1: Load sequences dataset and fetch only positive (malware samples)
 
@@ -121,23 +117,32 @@ def main():
         # save pretrained generator
         torch.save(generator.state_dict(), f"saved_models/generator_{args.pretrain_epochs}.pth")
 
-    # else:
-    #     # load weights to the generator 
-    #     # gen_checkpoint_path = "lightning_logs/version_2/checkpoints/epoch=9-step=660.ckpt"
-    #     gen_checkpoint_path = "lightning_logs/version_8/checkpoints/epoch=9-step=330.ckpt"
-    #     generator = Generator.load_from_checkpoint(checkpoint_path=gen_checkpoint_path)
+    else:
+        # load weights to the generator 
+        # gen_checkpoint_path = "lightning_logs/version_2/checkpoints/epoch=9-step=660.ckpt"
+        gen_checkpoint_path = "lightning_logs/version_16/checkpoints/epoch=94-step=3135.ckpt"
+        generator = Generator.load_from_checkpoint(checkpoint_path=gen_checkpoint_path)
 
+    
     sequence_sampler = SequenceGenerator(generator, tokenizer, args.seq_length, args.batch_size)
+
+    # generate samples for pre-training the discriminator
+    n = len(malware_train_sequences)
+    filename = "data/generated_data.csv"
+    # sequence_sampler.sample_multi(n=n,filename=filename)
 
     
     if args.pre_training_disc:
         # generate multiple samples and save them in a file.
         # n = len(malware_train_sequences)
-        sequence_sampler.sample_multi(n=args.batch_size * 5,filename="data/generated_data.csv")
+        # sequence_sampler.sample_multi(n=n,filename=filename)
         # step 2: Pretrain discriminator [if pretrain_disc is True]   
-        disc_trainer = L.Trainer( max_epochs=args.pretrain_epochs, enable_progress_bar=True, precision=16, log_every_n_steps=n_steps, accelerator=accelerator)
+        disc_trainer = L.Trainer(max_epochs=args.pretrain_epochs, enable_progress_bar=True, precision=16, log_every_n_steps=n_steps, accelerator=accelerator)
+        
+        # grab negative samples
+        gen_malware_sequences = read_generated_samples(filename, clean=True, tokenizer=tokenizer, token2int=True) 
 
-        disc_data_module = DisDataModule(malware_train_sequences, malware_train_sequences, max_seq_len=args.seq_length,batch_size=args.batch_size,  tokenizer=tokenizer)
+        disc_data_module = DisDataModule(malware_train_sequences, gen_malware_sequences, max_seq_len=args.seq_length,batch_size=args.batch_size,  tokenizer=tokenizer)
         # print(disc_dataloader.train_dataloader())
     
         disc_data_module.setup()
@@ -145,10 +150,16 @@ def main():
 
         # save pretrained generator
         torch.save(generator.state_dict(), f"saved_models/discriminator_{args.pretrain_epochs}.pth")
-    # else:
-    #     dis_checkpoint_path = "lightning_logs/version_4/checkpoints/epoch=0-step=118.ckpt"
-    #     hparams_file = "lightning_logs/version_4/checkpoints/hparams.yaml"
-    #     discriminator= Discriminator.load_from_checkpoint(checkpoint_path=dis_checkpoint_path, hparams_file=hparams_file)
+    
+    else:
+        # discriminator = Discriminator(vocab_size=len(tokenizer.tokenlist), embedding_dim=args.embedding_dim, num_heads=args.num_heads, num_layers=args.num_encoders, dim_feedforward=args.dim_feedforward, seq_length=args.seq_length, dropout=args.dropout)
+        dis_checkpoint_path = "lightning_logs/version_17/checkpoints/epoch=14-step=885.ckpt"
+        # hparams_file = "lightning_logs/version_20/checkpoints/hparams.yaml"
+        discriminator = Discriminator.load_from_checkpoint(checkpoint_path=dis_checkpoint_path)
+        # model_path = "saved_models/discriminator_20.pth"
+        # discriminator.load_state_dict(torch.load(model_path))
+
+        # discriminator = torch.load(dis_checkpoint_path)
 
     if args.adversarial_training:
         # step 3: train the tengan model 

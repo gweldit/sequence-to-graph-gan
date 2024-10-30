@@ -1,11 +1,9 @@
 # import argparse
 import csv
-import json
 import os
 
 import lightning as L
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,8 +12,12 @@ from torchmetrics.classification import BinaryF1Score
 from tqdm import tqdm
 
 # from data_iter import GenDataModule, DisDataModule
-from transformer import (CustomTransformerEncoderLayer, PositionalEncoding,
-                         create_causal_mask, create_padding_mask)
+from transformer import (
+    CustomTransformerEncoderLayer,
+    PositionalEncoding,
+    create_causal_mask,
+    create_padding_mask,
+)
 
 
 class Generator(L.LightningModule):
@@ -121,6 +123,7 @@ class Generator(L.LightningModule):
 class Discriminator(L.LightningModule):
     def __init__(self, vocab_size, embedding_dim, num_heads, num_layers,dim_feedforward, seq_length, dropout=0.5, batch_first=False, save_dir='discriminator_checkpoints', use_wgan=False):
         super(Discriminator, self).__init__()
+        self.save_hyperparameters()
         self.embed_size = embedding_dim
         self.seq_length = seq_length
         self.f1_metric = BinaryF1Score() 
@@ -178,6 +181,7 @@ class Discriminator(L.LightningModule):
         data, labels = batch
         preds = self(data) # [batch_size, embed_dim] 
         loss = torch.zeros(1)
+
         if self.use_wgan:
             d_real_loss = preds[labels == 1].mean()
             d_fake_loss = preds[labels == 0].mean()
@@ -185,11 +189,9 @@ class Discriminator(L.LightningModule):
             # Wasserstein GAN Loss: Critic maximizes E[D(x)] - E[D(G(z))]
             loss = d_fake_loss - d_real_loss
         else:
-        
             loss = self.bce_loss(preds, labels.unsqueeze(1).float()) 
 
         # compute f1 score
-        
         f1_score = self.f1_metric(torch.sigmoid(preds).squeeze(1), labels)  
         
         return loss, f1_score
@@ -279,22 +281,6 @@ class SequenceGenerator:
         return sample_tensor
     
 
-    # def sample_multi(self, n, filename=None):
-    #     samples = []
-    #     for _ in tqdm(range(int(n / self.batch_size))):
-    #         # Generate n batches
-    #         print("generating batches ...")
-    #         batch_sample = self.sample()
-    #         samples.extend(batch_sample.detach().cpu().numpy())
-    #     # Write the "n" samples into file
-    #     if filename:
-    #         with open(filename, 'w') as fout:
-    #             for s in samples:
-    #                 print("writing sample to a file ...")
-    #                 fout.write('{}\n'.format(s))
-    #     return samples
-    
-
     def sample_multi(self, n, filename=None):
         samples = []
         for _ in tqdm(range(int(n / self.batch_size))):
@@ -310,10 +296,9 @@ class SequenceGenerator:
             print("writing samples to a file ...")
             # df = pd.DataFrame(samples)
             # Write to CSV file
-            with open('output.csv', 'w', newline='') as file:
+            with open(filename, 'w', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerows(samples)
-
 
         return samples
 
@@ -321,10 +306,6 @@ class SequenceGenerator:
 class TenGAN(L.LightningModule):
     def __init__(self, generator, disscriminator, sequence_sampler, args):
         super(TenGAN, self).__init__()
-        # self.generator = Generator(vocab_size=args.vocab_size,embedding_dim=args.embedding_dim,num_heads=args.num_heads,num_layers=args.num_encoders,dim_feedforward=args.dim_feedforward, seq_length=args.seq_length,dropout=args.dropout)
-
-        # self.discriminator = Discriminator(vocab_size=args.vocab_size,embedding_dim=args.embedding_dim,num_heads=args.num_heads,num_layers=args.num_encoders,dim_feedforward=args.dim_feedforward, seq_length=args.seq_length,dropout=args.dropout)
-
         self.generator = generator
         self.discriminator = disscriminator
         self.sampler = sequence_sampler # use the same generator instance for sampling token-by-token sequences to compute RL-policy gradient
@@ -354,6 +335,11 @@ class TenGAN(L.LightningModule):
         logits = self.generator(generated_sequences[:, :-1])
         log_probs = F.log_softmax(logits, dim=-1)
         selected_log_probs = log_probs.gather(2, generated_sequences[:, 1:].unsqueeze(-1)).squeeze(-1)
+
+        # reduce variance for stability and normalizing the rewards
+        b = rewards.mean() # b(Y_t:T)
+        rewards = rewards - b
+
         loss = -torch.mean(selected_log_probs * rewards.unsqueeze(-1))
         return loss
 
@@ -378,7 +364,7 @@ class TenGAN(L.LightningModule):
         # print("optimizer is instance of ", type(gen_optimizer))
         # Access current epoch
         
-        print(f"Running Epoch: {self.current_epoch} / {self.trainer.max_epochs}")
+        print(f"Running Epoch: {self.current_epoch + 1} / {self.trainer.max_epochs}")
         # Update generator for g_steps times
         gen_loss_total = torch.zeros(1).to(self.device)
         for _ in range(self.g_steps):
@@ -404,6 +390,10 @@ class TenGAN(L.LightningModule):
         # log losses
         self.log('gen_loss', gen_loss_avg.item(), on_step=False, on_epoch=True, prog_bar=True, logger=True)
         print("g loss = ", gen_loss_avg.item())
+
+        if (self.current_epoch +1) % 5 == 0:
+            # save generator
+            torch.save(self.generator,f"saved_models/adv_generator_{self.current_epoch+1}.pt")
         
             
         
@@ -418,56 +408,6 @@ class TenGAN(L.LightningModule):
         disc_optimizer.step()
         # log loss
         self.log('disc_loss', disc_loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-
-        
-        # print("d loss = ", disc_loss.item())
-        
-        # print(type(gen_loss_avg),"|", type(disc_loss))
-        # return gen_loss_avg, disc_loss
-
-    
-        # # Log losses
-        # self.log('gen_loss', gen_loss_avg)
-        # self.log('disc_loss', disc_loss)
-
-        # return gen_loss_avg,  disc_loss
-    
-
-    # def discriminator_step(self, real_data, fake_data):
-    #     real_output = self.discriminator(real_data)
-    #     fake_output = self.discriminator(fake_data.argmax(dim=-1))
-    #     d_loss = -torch.mean(torch.log(real_output) + torch.log(1. - fake_output))
-    #     return d_loss
-
-    # def training_step(self, batch, batch_idx, optimizer_idx):
-    #     real_data = batch
-    #     if self.pre_training_gen:
-    #         self.pretrain_generator(batch)
-
-    #     if self.pretrain_discriminator:
-    #         self.pretrain_discriminator(batch)
-
-        
-    #     # adversarial training
-    #     if self.adversarial_training:
-    #         noise = torch.randint(0, self.vocab_size, (batch.size(0), self.seq_length), device=self.device)
-    #         fake_data = self.generator(noise)
-
-    #         if optimizer_idx == 0:
-    #             g_loss = self.generator_step(batch)
-    #             self.log('g_loss', g_loss)
-    #             return g_loss
-
-    #         if optimizer_idx == 1:
-    #             d_loss = self.discriminator_step(real_data, fake_data)
-    #             self.log('d_loss', d_loss)
-    #             return d_loss
-
-    # def configure_optimizers(self):
-    #     g_optimizer = optim.Adam(self.generator.parameters(), lr=0.0002)
-    #     d_optimizer = optim.Adam(self.discriminator.parameters(), lr=0.0002)
-    #     return [g_optimizer, d_optimizer], [] 
-
 
     def on_train_end(self):
         # Save the generator and discriminator models

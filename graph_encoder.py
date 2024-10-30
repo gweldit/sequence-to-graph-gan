@@ -17,12 +17,6 @@ from sklearn.preprocessing import LabelEncoder
 # from syscall_file_reader import SyscallFileReader
 from torch_geometric.data import Data
 
-# RELEVANT_SYSCALLS = {
-#     "recvfrom", "write", "ioctl", "read", "sendto", "writev", "close", "socket", "bind", "connect",
-#     "mkdir", "access", "chmod", "open", "fchown", "rename", "unlink", "umask", "recvmsg", "sendmsg",
-#     "getdents64", "epoll_wait", "dup", "pread", "pwrit", "fcntl64"
-# }
-
 
 class GraphEncoder:
     """Class to encode system call sequences into graph structures."""
@@ -271,7 +265,7 @@ def main():
     args = parser.parse_args()
 
     sequences, labels = read_all_sequences(args.dataset_folder)
-
+    print("The type of data in sequences = ", type(sequences[0][0]))
     # build vocabulary
     # save vocabs in json file
     # split data into train and test sets

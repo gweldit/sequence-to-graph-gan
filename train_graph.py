@@ -92,12 +92,12 @@ def main():
     set_random_seeds()
 
     # train_dataset, test_dataset, vocab_size, label_encoder = load_data(args.dataset_path)
-    vocab_size = 175
+    vocab_size = len(enc.load_vocabulary()) 
 
     train_dataset, vocab_size, label_encoder = enc.load_graph_data("data/train_graph_data.pkl", vocab_size=vocab_size,training=True, )
 
     # print(train_dataset[0])
-
+    # print("curr dir ", os.listdir(os.getcwd()))
 
     # if oversampling / use fake data is true
     if args.use_fake_data is True:
