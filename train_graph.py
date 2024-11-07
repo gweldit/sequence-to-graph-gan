@@ -5,10 +5,10 @@ import torch
 from graph_encoder import GraphEncoder as enc
 from torch.optim.lr_scheduler import OneCycleLR
 from torch_geometric.loader import DataLoader
-
+from torch.utils.data import WeightedRandomSampler
 from models import GNNModel
 from utils import ExperimentTracker, set_random_seeds
-
+from ros import create_balanced_dataloader # random over sampling
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Train a GNN model on a graph dataset")
@@ -37,11 +37,17 @@ def parse_arguments():
     # add boolean argument to perform oversampling of the minority class
     parser.add_argument("--use_fake_data",  action='store_true',default=False, help="use fake data flag.")
 
-
-
+    parser.add_argument("--wrs", action="store_true", default=False, help="it activates a weighted oversampling. It is more efficient and dynamic that random oversampling or ROS.")
+    parser.add_argument("--ros", action="store_true", default=False, help="Random Oversampling of minority class")
     # Other Parameters
     args = parser.parse_args()
     args.experiment_name = args.model + "_balanced" if args.use_fake_data else args.model
+    
+    if args.ros:
+        args.experiment_name += "_ROS"
+
+    if args.wrs:
+        args.experiment_name += "_WRS"
 
     return args
 
@@ -55,10 +61,12 @@ def initialize_model(vocab_size, num_node_features, num_classes, num_steps_per_e
     return model, optimizer, scheduler, criterion
 
 
-def train_epoch(model, train_loader, optimizer, scheduler, criterion, device):
+def train_epoch(model, train_loader, optimizer, scheduler, criterion, device, max_num_steps_per_epoch=16):
     model.train()
     total_loss = []
-    for data in train_loader:
+    for batch_idx, data in enumerate(train_loader):
+        if batch_idx >= max_num_steps_per_epoch: # fixed steps_per_epoch 
+            break
         data = data.to(device)
         optimizer.zero_grad()
         # print("max token = ", data.x[:,0].max())
@@ -95,7 +103,7 @@ def main():
     vocab_size = len(enc.load_vocabulary()) 
 
     train_dataset, vocab_size, label_encoder = enc.load_graph_data("data/train_graph_data.pkl", vocab_size=vocab_size,training=True, )
-
+    
     # print(train_dataset[0])
     # print("curr dir ", os.listdir(os.getcwd()))
 
@@ -105,29 +113,64 @@ def main():
         fake_dataset, vocab_size, label_encoder = enc.load_graph_data("data/fake_graph_data.pkl", vocab_size=vocab_size,training=True, label_encoder=label_encoder)
 
         # combine train_dataset and fake_dataset
-        train_dataset = train_dataset + fake_dataset    
+        train_dataset = train_dataset + fake_dataset 
 
-        print("type of train_dataset,", type(train_dataset[0]))
+        # print("type of train_dataset,", type(train_dataset[0]))
         # print("sample dataset = ",  ([train_dataset[i].x[:,0].min().item() for i in range(len(train_dataset))]))
         
         print("len of train dataset = ", len(train_dataset))
     else:
         print("len of training dataset = ", len(train_dataset))
-        
+    
     test_dataset, vocab_size, _ = enc.load_graph_data("data/test_graph_data.pkl", vocab_size=vocab_size, training=False,label_encoder=label_encoder)
+
+
+    
+
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False)
+    # get the number of batches before balancing
+    num_batches = len(train_loader)
 
+    epochs = args.epochs
+    total_iterations = epochs * num_batches 
+
+
+
+    if args.wrs and not args.use_fake_data:
+        # create weighted random oversmapler
+        # Calculate class frequencies
+        labels = torch.tensor([data.y.item() for data in train_dataset])
+        class_counts = torch.bincount(labels)
+        class_weights = 1. / class_counts.float()
+
+        # Assign sample weights based on label
+        sample_weights = class_weights[labels]
+        sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
+    
+        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False, drop_last=True, sampler=sampler)
+    
+    
+    if args.ros and not args.use_fake_data:
+        # create random oversmapling
+        train_loader = create_balanced_dataloader(train_dataset, classes=train_dataset[0].y.unique(), batch_size=args.batch_size)
+        
+        # adjust epochs to perform fair comparision between unbalanced and balanced datasets.
+        epochs = total_iterations // len(train_loader)
     # Extract `num_node_features` and `num_classes` to pass to `initialize_model`
     num_node_features = train_dataset[0].num_node_features
     num_classes = len(label_encoder.classes_)
-    num_steps_per_epoch = len(train_loader)
+    num_steps_per_epoch = len(train_loader) # 16 or 17
+
+    # num_steps_per_epoch = 16 
+
+    print("The num of steps per epoch =", num_steps_per_epoch) # , "but fixed num_steps_per_epoch = 16 is used.")
 
     model, optimizer, scheduler, criterion = initialize_model(vocab_size, num_node_features, num_classes, num_steps_per_epoch, args, device)
 
     experiment_tracker = ExperimentTracker(model, optimizer, scheduler, label_encoder, args)
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(1, epochs + 1):
         loss = train_epoch(model, train_loader, optimizer, scheduler, criterion, device)
         train_preds, train_labels = evaluate_model(model, train_loader, device)
         test_preds, test_labels = evaluate_model(model, test_loader, device)
