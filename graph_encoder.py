@@ -9,14 +9,14 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import torch
 import torch_geometric
-from custom_dataset import CustomGraphDataset
-from file_reader import (load_and_print_dataset, read_all_sequences,
-                         save_sequence_data)
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+
 # from syscall_file_reader import SyscallFileReader
 from torch_geometric.data import Data
 
+from custom_dataset import CustomGraphDataset
+from file_reader import load_and_print_dataset, read_all_sequences, save_sequence_data
 
 class GraphEncoder:
     """Class to encode system call sequences into graph structures."""
@@ -190,7 +190,7 @@ class GraphEncoder:
 
             dataset = CustomGraphDataset(graphs, len(label_encoder.classes_), training=training)
     
-            return dataset, vocab_size, label_encoder 
+            return dataset, vocab_size, label_encoder
 
 
     def plot_graph(self, file_path, filter_calls, graph, node_mapping):
