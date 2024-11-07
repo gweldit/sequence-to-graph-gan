@@ -232,7 +232,7 @@ def load_graph_data(file_path, training=False):
         # train_labels = ["normal" if label == 0 else "malware" for label in train_labels]
         # test_labels = ["normal" if label == 0 else "malware" for label in test_labels]
 
-        labels = ["normal" if label == 0 else "malware" for label in labels]
+        labels = ["benign" if label == 0 else "malware" for label in labels]
 
         # Encode labels
         label_encoder = LabelEncoder()
