@@ -1,9 +1,9 @@
 import math
 
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 
 # Create a causal mask to prevent attending to future tokens
 def create_causal_mask(seq_len):
@@ -103,11 +103,11 @@ class MaskedSelfAttention(nn.Module):
             print("shape of attn mask ", attn_mask.shape)
             
             # attn_mask = attn_mask.unsqueeze(1)
-            energy = energy.masked_fill(attn_mask == 0, float("-1e9"))
+            energy = energy.masked_fill(attn_mask == 0, float("-1e3"))
 
         if scr_key_padding_mask is not None:
             print("padding mask: ", scr_key_padding_mask.shape, "|", energy.size())
-            energy = energy.masked_fill(scr_key_padding_mask==0, float("-1e9"))
+            energy = energy.masked_fill(scr_key_padding_mask==0, float("-1e3"))
 
         # Apply softmax to obtain attention weights
         attention = torch.softmax(energy / (self.embed_size ** (1 / 2)), dim=3)
@@ -173,18 +173,7 @@ class TransformerBlock(nn.Module):
         # Add & Norm
         out = self.dropout(self.norm2(forward + x))
         
-        return out
-    
-# class CustomTransformerEncoderLayer(nn.TransformerEncoderLayer):
-#     def __init__(self, embed_size, num_heads, forward_expansion, dropout):
-#         super(CustomTransformerEncoderLayer, self).__init__(d_model=embed_size, nhead=num_heads, dim_feedforward=forward_expansion, dropout=dropout, activation="relu", batch_first=True)
-#         self.self_attn = MaskedSelfAttention(embed_size, num_heads)
-#         self.norm = nn.LayerNorm(embed_size)
-#         self.dropout = nn.Dropout(dropout)
-
-#     def forward(self, x, attn_mask, key_padding_mask):
-#         x = self.norm(x + self.dropout(self._forward(x, attn_mask, key_padding_mask)))
-#         return x
+        return out 
     
 class TransformerEncoder(nn.Module):
     def __init__(self, embed_size, num_heads, num_layers, forward_expansion, dropout):
@@ -265,14 +254,14 @@ class MaskedMultiheadAttention(nn.Module):
             attn_mask = attn_mask.repeat(N, H, 1, 1).to(energy.device) # .unsqueeze(1)
             # print("shape of attn mask ", attn_mask.shape)
             # print("shape of energy mask ", energy.shape)
-            energy = energy.masked_fill(attn_mask == 0, float("-1e9"))
+            energy = energy.masked_fill(attn_mask == 0, float("-1e3"))
 
         if src_key_padding_mask is not None:
             # Correctly expand the src_key_padding_mask to match the energy dimensions
             src_key_padding_mask = src_key_padding_mask.unsqueeze(1).unsqueeze(2)
             src_key_padding_mask = src_key_padding_mask.expand(-1, energy.size(1), energy.size(2), -1)
             # print("TE SHAPE OF THE PADDING MASK IS:", src_key_padding_mask.size(), "| shape of the energy =", energy.size())
-            energy = energy.masked_fill(src_key_padding_mask == 0, float("-1e9"))
+            energy = energy.masked_fill(src_key_padding_mask == 0, float("-1e3"))
 
         # Apply softmax to obtain attention weights
         attention = torch.softmax(energy / (self.embed_size ** (1 / 2)), dim=3)
@@ -338,16 +327,6 @@ if __name__ == '__main__':
     dim_feedforward = 512 
     dropout = 0.5
     attn_mask = create_causal_mask(seq_len) #.float()
-    # print("attn mask = ", attn_mask)
-
-    # block = TransformerBlock(embed_size, num_heads, forward_expansion, dropout)
-
-    # noise = torch.randint(0, vocab_size, size=(batch_size, seq_len))
-    # key_padding_mask = (noise == 0) # .float()
-
-
-    # out = encoder(noise, attn_mask, key_padding_mask=key_padding_mask)
-    # print(out.shape)
 
 
     # Create random input tensor (batch_size, seq_len, embed_size)
@@ -357,26 +336,7 @@ if __name__ == '__main__':
     data = embedding(tokens)
 
     padding_mask = create_padding_mask(tokens)
-    # print("shape of x = ", x.shape)
 
-    # # Padding mask: for example, the first sentence has length 7, and the second has length 5
-    # padding_mask = torch.tensor([[1, 1, 1, 1, 1, 1, 1, 0, 0, 0],  # First sequence (padded at the end)
-    #                             [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]])  # Second sequence (more padding)
-
-    # # Generate the combined padding and attention mask
-    # padding_mask = generate_masks(seq_len, batch_size, padding_mask)
-
-    # # Initialize the self-attention module
-    # attention = MaskedSelfAttention(embed_size=embed_size, num_heads=num_heads)
-    # enc_layer = CustomTransformerEncoderLayer(embed_size, num_heads,128, dropout=0.5, batch_first=False)
-    # # Forward pass with the combined mask
-    
-    # out = attention(x, x, x, attn_mask, None)
-
-    # print("Masked self attention output: ", out.shape)  # Expected output shape: (batch_size, seq_len, embed_size)
-
-    # enc_output = enc_layer(x, attn_mask, None)
-    # # print("Transformer encoder's output shape =", enc_output.shape)
 
 
     # create CustomTransformer Encoder Layer
@@ -389,3 +349,4 @@ if __name__ == '__main__':
 
     print("Transformer Encoders output shape =", output.shape)
     
+
