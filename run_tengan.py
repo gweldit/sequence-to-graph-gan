@@ -120,8 +120,11 @@ def main():
     else:
         # load weights to the generator 
         # gen_checkpoint_path = "lightning_logs/version_2/checkpoints/epoch=9-step=660.ckpt"
-        gen_checkpoint_path = "lightning_logs/version_16/checkpoints/epoch=94-step=3135.ckpt"
-        generator = Generator.load_from_checkpoint(checkpoint_path=gen_checkpoint_path)
+        # gen_checkpoint_path = "lightning_logs/version_16/checkpoints/epoch=94-step=3135.ckpt"
+
+        gen_checkpoint_path = "lightning_logs/version_20/checkpoints/epoch=49-step=1650.ckpt"
+
+        generator = Generator.load_from_checkpoint(checkpoint_path=gen_checkpoint_path) 
 
     
     sequence_sampler = SequenceGenerator(generator, tokenizer, args.seq_length, args.batch_size)
@@ -140,9 +143,9 @@ def main():
         disc_trainer = L.Trainer(max_epochs=args.pretrain_epochs, enable_progress_bar=True, precision=16, log_every_n_steps=n_steps, accelerator=accelerator)
         
         # grab negative samples
-        gen_malware_sequences = read_generated_samples(filename, clean=True, tokenizer=tokenizer, token2int=True) 
+        gen_malware_sequences = read_generated_samples(filename, clean=True, tokenizer=tokenizer, token2int=True)
 
-        disc_data_module = DisDataModule(malware_train_sequences, gen_malware_sequences, max_seq_len=args.seq_length,batch_size=args.batch_size,  tokenizer=tokenizer)
+        disc_data_module = DisDataModule(malware_train_sequences, gen_malware_sequences, max_seq_len=args.seq_length,batch_size=args.batch_size, tokenizer=tokenizer)
         # print(disc_dataloader.train_dataloader())
     
         disc_data_module.setup()
@@ -153,7 +156,8 @@ def main():
     
     else:
         # discriminator = Discriminator(vocab_size=len(tokenizer.tokenlist), embedding_dim=args.embedding_dim, num_heads=args.num_heads, num_layers=args.num_encoders, dim_feedforward=args.dim_feedforward, seq_length=args.seq_length, dropout=args.dropout)
-        dis_checkpoint_path = "lightning_logs/version_17/checkpoints/epoch=14-step=885.ckpt"
+        # dis_checkpoint_path = "lightning_logs/version_17/checkpoints/epoch=14-step=885.ckpt"
+        dis_checkpoint_path = "lightning_logs/version_21/checkpoints/epoch=49-step=1700.ckpt"
         # hparams_file = "lightning_logs/version_20/checkpoints/hparams.yaml"
         discriminator = Discriminator.load_from_checkpoint(checkpoint_path=dis_checkpoint_path)
         # model_path = "saved_models/discriminator_20.pth"
@@ -165,7 +169,8 @@ def main():
         # step 3: train the tengan model 
         real_data_module = GenDataModule(malware_train_sequences,max_seq_len=args.seq_length, train_size=len(malware_train_sequences), batch_size=args.batch_size,tokenizer=tokenizer)
         real_data_module.setup()
-        gan_model = TenGAN(generator, discriminator, sequence_sampler, args)
+        # gan_model = TenGAN(generator, discriminator, sequence_sampler, args)
+        gan_model = TenGAN(generator, discriminator, tokenizer, args)
         # trainers for gan model
         
         gan_trainer = L.Trainer(enable_progress_bar=True, precision=16, log_every_n_steps=n_steps, accelerator="mps", max_epochs=args.epochs) # accumulate_grad_batches=4
@@ -180,3 +185,7 @@ def main():
 
 if __name__ == "__main__":
     main()  
+
+    # 1) pretrain generator:python3 run_tengan.py --pretrain_epochs=50 --pre_training_gen=True
+    # 2) pretrain discriminator, generate samples, then :python3 run_tengan.py --pretrain_epochs=20 --pre_training_disc=True
+    # 3) adversarial training:python3 run_tengan.py --pretrain_epochs=20 --pre_training_gen=False --pre_training_disc=False --adversarial_training=True

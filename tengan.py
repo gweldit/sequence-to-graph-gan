@@ -12,6 +12,7 @@ from torchmetrics.classification import BinaryF1Score
 from tqdm import tqdm
 
 # from data_iter import GenDataModule, DisDataModule
+from tokenizer import Tokenizer
 from transformer import (
     CustomTransformerEncoderLayer,
     PositionalEncoding,
@@ -55,6 +56,65 @@ class Generator(L.LightningModule):
         encoder_output = self.transformer_encoder(embedded, mask=attn_mask, src_key_padding_mask=padding_mask)
         output = self.fc(encoder_output)
         return output
+
+
+    def sample(self, batch_size: int, tokenizer, start_tokens: torch.Tensor):
+        """
+        Generate sequences of tokens and return both the sequences and logits.
+        """
+        finished = [False] * batch_size
+        gen_sequences = torch.zeros((batch_size, self.max_seq_length), dtype=torch.long).to(self.device)
+        all_logits = []
+
+        # Start with start token
+        gen_sequences[:, 0] = start_tokens
+
+        with torch.no_grad():
+            for i in range(1, self.max_seq_length):
+                logits = self.forward(gen_sequences[:, :i])
+                all_logits.append(logits[:, -1, :])  # Store logits for the current step
+
+                probabilities = F.softmax(logits[:, -1, :], dim=-1)
+                sampled_token = torch.multinomial(probabilities, 1).squeeze()
+
+                for idx in range(batch_size):
+                    if finished[idx]:
+                        sampled_token[idx] = tokenizer.token_to_int[tokenizer.end]
+                    if sampled_token[idx] == tokenizer.token_to_int[tokenizer.end]:
+                        finished[idx] = True
+
+                gen_sequences[:, i] = sampled_token
+
+                if all(finished):
+                    break
+
+        # Stack all logits to form a tensor of shape (batch_size, max_seq_length, vocab_size)
+        all_logits = torch.stack(all_logits, dim=1)
+
+        return gen_sequences, all_logits
+
+    
+
+    def sample_multi(self, batch_size:int, n:int, tokenizer:Tokenizer, start_tokens: torch.Tensor, filename=None):
+        samples = []
+        for _ in tqdm(range(int(n / batch_size))):
+            # Generate n batches
+            print("generating batches ...")
+            batch_sample, logits = self.sample(batch_size, tokenizer, start_tokens)
+            samples.append(batch_sample.detach().cpu().numpy())
+
+        samples = np.concatenate(samples, axis=0).tolist()
+
+        # Write the "n" samples into file
+        if filename:
+            print("writing samples to a file ...")
+            # df = pd.DataFrame(samples)
+            # Write to CSV file
+            with open(filename, 'w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerows(samples)
+
+        return samples
     
     def step(self, batch, batch_idx):
         # loss_fn = nn.CrossEntropyLoss()
@@ -72,26 +132,18 @@ class Generator(L.LightningModule):
         # print("shape of targets: ", targets.shape)
 
 
-        loss = F.cross_entropy(outputs, targets)
+        # loss = F.cross_entropy(outputs, targets)
 
         # Apply the padding mask to the loss
-        # padding_mask = (targets != 0).float()
-        # loss = F.cross_entropy(outputs, targets, reduction='none')
-        # # Apply the padding mask to the loss
-        # loss = loss * padding_mask.reshape(-1)
-        # # Normalize the masked loss
-        # loss = loss.sum() / padding_mask.sum()
+        padding_mask = (targets != 0).float()
+        loss = F.cross_entropy(outputs, targets, reduction='none')
+        # Apply the padding mask to the loss
+        loss = loss * padding_mask.reshape(-1)
+        # Normalize the masked loss
+        loss = loss.sum() / padding_mask.sum()
 
         return loss
     
-    # def step(self, batch, batch_idx):
-    #     # gen_output = self.forward(batch)
-
-    #     # # return loss of generator
-
-    #     loss = self.pretrain_step(batch, batch_idx)
-
-    #     return loss
 
 
     def training_step(self, batch, batch_idx):
@@ -304,11 +356,12 @@ class SequenceGenerator:
 
 
 class TenGAN(L.LightningModule):
-    def __init__(self, generator, disscriminator, sequence_sampler, args):
+    def __init__(self, generator, disscriminator, tokenizer, args):
         super(TenGAN, self).__init__()
         self.generator = generator
         self.discriminator = disscriminator
-        self.sampler = sequence_sampler # use the same generator instance for sampling token-by-token sequences to compute RL-policy gradient
+        self.tokenizer = tokenizer
+        # self.sampler = sequence_sampler # use the same generator instance for sampling token-by-token sequences to compute RL-policy gradient
 
         self.criterion = nn.CrossEntropyLoss() # minimizing criterion is same as MLE
         self.bce_loss = torch.nn.BCEWithLogitsLoss()
@@ -325,23 +378,73 @@ class TenGAN(L.LightningModule):
     # def forward(self, noise):
     #     return self.generator(noise)
     
+    def monte_carlo_rollout(self, sequences, num_rollouts=16):
+        """
+        Monte Carlo rollout for reward estimation
+        """
+        with torch.no_grad():
+            batch_size = sequences.size(0)
+            rewards = torch.zeros(batch_size, sequences.size(1)).to(self.device)
+            
+            for t in range(1, sequences.size(1)): # idx is start token skip it.
+                curr_rewards = []
+                for _ in range(num_rollouts):
+                    rollout_seq = sequences.clone()
+                    if t < sequences.size(1) - 1:
+                        completion, _ = self.generator.sample(batch_size,self.tokenizer, rollout_seq[:, t])
+                        rollout_seq[:, t+1:] = completion[:, :(sequences.size(1)-t-1)]
+                    reward = self.discriminator(rollout_seq)
+                    curr_rewards.append(reward)
+                
+                rewards[:, t] = torch.stack(curr_rewards).mean(dim=0).squeeze()
+            
+            return rewards
     
     def compute_rewards(self, generated_sequences):
         with torch.no_grad():
             rewards = self.discriminator(generated_sequences).squeeze()
         return rewards
 
-    def gen_step(self, generated_sequences, rewards):
-        logits = self.generator(generated_sequences[:, :-1])
+    # def gen_step(self, generated_sequences, rewards):
+    #     logits = self.generator(generated_sequences[:, :-1])
+    #     log_probs = F.log_softmax(logits, dim=-1)
+    #     selected_log_probs = log_probs.gather(2, generated_sequences[:, 1:].unsqueeze(-1)).squeeze(-1)
+
+    #     # reduce variance for stability and normalizing the rewards
+    #     b = rewards.mean() # b(Y_t:T)
+    #     rewards = rewards - b
+
+    #     loss = -torch.mean(selected_log_probs * rewards.unsqueeze(-1))
+    #     return loss
+
+    # def generator_loss(self, generated_samples, rewards):
+    #     """
+    #     Policy Gradient loss for generator
+    #     """
+    #     probs = F.softmax(generated_samples, dim=-1)
+    #     log_probs = torch.log(probs + 1e-10)
+    #     loss = -torch.mean(log_probs * rewards)
+    #     return loss
+
+    def gen_step(self, gen_sequences, logits, rewards):
+        """
+        Policy Gradient loss for generator
+        """
+        # Compute log probabilities
         log_probs = F.log_softmax(logits, dim=-1)
-        selected_log_probs = log_probs.gather(2, generated_sequences[:, 1:].unsqueeze(-1)).squeeze(-1)
+        
+        # Gather log probabilities for the actual tokens
+        log_probs_for_tokens = log_probs.gather(2, gen_sequences.unsqueeze(-1)).squeeze(-1)
+        
+        # Optionally normalize rewards
+        rewards = rewards - rewards.mean()
+        
+        # Compute the policy gradient loss
+        g_loss = -torch.mean(log_probs_for_tokens * rewards)
+    
+        return g_loss
 
-        # reduce variance for stability and normalizing the rewards
-        b = rewards.mean() # b(Y_t:T)
-        rewards = rewards - b
 
-        loss = -torch.mean(selected_log_probs * rewards.unsqueeze(-1))
-        return loss
 
     def disc_step(self, real_sequences, generated_sequences):
         real_labels = torch.ones(real_sequences.size(0), 1).to(real_sequences.device)
@@ -353,11 +456,12 @@ class TenGAN(L.LightningModule):
         real_loss = F.binary_cross_entropy(real_outputs, real_labels)
         fake_loss = F.binary_cross_entropy(fake_outputs, fake_labels)
 
-        loss = real_loss + fake_loss
+        loss = (real_loss + fake_loss) / 2
         return loss
 
     def training_step(self, batch, batch_idx):
         real_sequences = batch
+        batch_size = batch.size(0)
         # Access optimizers
         gen_optimizer, disc_optimizer = self.optimizers()
 
@@ -366,39 +470,47 @@ class TenGAN(L.LightningModule):
         
         print(f"Running Epoch: {self.current_epoch + 1} / {self.trainer.max_epochs}")
         # Update generator for g_steps times
-        gen_loss_total = torch.zeros(1).to(self.device)
-        for _ in range(self.g_steps):
-            # Generate sequences
-            # print("Generating sequences ...")
-            generated_sequences = self.sampler.sample()
-            # print("Generating sequences is complete.")
-            # Compute rewards
-            rewards = self.compute_rewards(generated_sequences)
-            # print("Generating rewards is complete")
-            # Update generator
-            gen_loss = self.gen_step(generated_sequences, rewards)
-            gen_loss_total += gen_loss
-            # print("gen loss is complete")
-            # Zero gradients and perform backward pass for generator
-            gen_optimizer.zero_grad()
-            self.manual_backward(gen_loss)
-            gen_optimizer.step()
+        # gen_loss_total = torch.zeros(1).to(self.device)
+        # for _ in range(self.g_steps):
+            # # Generate sequences
+            # # print("Generating sequences ...")
+            # generated_sequences = self.sampler.sample()
+            # # print("Generating sequences is complete.")
+            # # Compute rewards
+            # rewards = self.compute_rewards(generated_sequences)
+            # # print("Generating rewards is complete")
+            # # Update generator
+            # gen_loss = self.gen_step(generated_sequences, rewards)
+            # gen_loss_total += gen_loss
+            # # print("gen loss is complete")
+            # # Zero gradients and perform backward pass for generator
+            # gen_optimizer.zero_grad()
+            # self.manual_backward(gen_loss)
+            # gen_optimizer.step()
 
-            
         
-        gen_loss_avg = gen_loss_total / self.g_steps
+
+        # generate sequences
+        start_tokens = torch.full((batch_size ,1), self.tokenizer.token_to_int[self.tokenizer.start]).long().squeeze().to(self.device)
+        generated_sequences, logits = self.generator.sample(batch_size,self.tokenizer, start_tokens)
+
+        rewards = self.monte_carlo_rollout(generated_sequences)
+        
+        # gen_loss_avg = gen_loss_total / self.g_steps
         # log losses
-        self.log('gen_loss', gen_loss_avg.item(), on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        print("g loss = ", gen_loss_avg.item())
+        # self.log('gen_loss', gen_loss_avg.item(), on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        # print("g loss = ", gen_loss_avg.item())
+
+        gen_loss = self.gen_step(generated_sequences, logits, rewards)
+
+        self.log('gen_loss', gen_loss.item(), on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        print("g loss = ", gen_loss.item())
 
         if (self.current_epoch +1) % 5 == 0:
             # save generator
             torch.save(self.generator,f"saved_models/adv_generator_{self.current_epoch+1}.pt")
         
-            
-        
-
-        
+    
         # Generate sequences for discriminator update
         disc_loss = self.disc_step(real_sequences, generated_sequences)
 
@@ -475,9 +587,6 @@ class TenGAN(L.LightningModule):
 
         # save the pretrain discriminator
         torch.save(self.discriminator.state_dict(), f'pretrain_discriminator_{epochs}.pt')
-
-
-
 
 
 
